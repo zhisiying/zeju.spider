@@ -1,0 +1,147 @@
+import requests
+from bs4 import BeautifulSoup
+from lxml import etree
+import time
+import pymysql
+
+
+def getMaxDBID():
+    # # 打开数据库连接
+    db = pymysql.connect("localhost", "root", "123456", "test", charset='utf8')
+    # # 使用cursor()方法获取操作游标
+    cursor = db.cursor()
+    ######## 楼盘信息表 hot_loupan
+    sql_base = "select max(id) from hot_loupan_copy_copy"
+    # 执行sql语句
+    cursor.execute(sql_base)
+    # 提交到数据库执行
+    db.commit()
+
+    results = cursor.fetchall()
+    maxID = results[0][0]  # 获取 当前表的最大 ID
+    try:
+        maxID = maxID + 1
+        return maxID
+    except:
+        return 1
+
+        # def updateDB(db,cursor,tableName,values,loupan_name):
+
+
+def updateDB(tableName, values, loupan_name):
+    # 打开数据库连接
+    db = pymysql.connect("localhost", "root", "123456", "test", charset='utf8')
+    # 使用cursor()方法获取操作游标
+    cursor = db.cursor()
+
+    for updateK, updateV in values.items():
+        sql = "update {0} set {1}={2} where loupan_name ='{3}'".format(tableName, updateK, updateV, loupan_name)
+        print(sql)
+        try:
+            # 执行sql语句
+            cursor.execute(sql)
+            # 提交到数据库执行
+            db.commit()
+        except Exception as e:
+            print(" error in  rollback ========= >>>>>>>>>  ", e)
+            print("into sql ============>>>>>>>>>>", sql)
+            db.rollback()
+
+    db.close()
+
+    # 获取 表中的 item_id 进行判断是否需要插入 新数据
+    # def getTotal(db,cursor,tableName,loupan_name):
+
+
+def getTotal(tableName, loupan_name):
+    # 打开数据库连接
+    db = pymysql.connect("localhost", "root", "123456", "test", charset='utf8')
+    # 使用cursor()方法获取操作游标
+    cursor = db.cursor()
+    sql = "select total from {0} where loupan_name = '{1}'".format(tableName, loupan_name)
+    print(sql)
+    flag = cursor.execute(sql)
+    if flag:
+        results = cursor.fetchall()  # 如果搜索不到 数据 ，则返回 () ,len(results) == 0
+        total = results[0][0]  # 获取 结果 元组
+        db.close()
+        print("total == ", total, type(total))
+        return total
+    else:
+        db.close()
+        return 0
+
+
+def getLocalFlag(tableName, loupan_name):
+    # 打开数据库连接
+    db = pymysql.connect("localhost", "root", "123456", "test", charset='utf8')
+    # 使用cursor()方法获取操作游标
+    cursor = db.cursor()
+    sql = "select has_fangtianxia from {0} where loupan_name = '{1}'".format(tableName, loupan_name)
+    flag = cursor.execute(sql)
+    if flag:
+        results = cursor.fetchall()  # 如果搜索不到 数据 ，则返回 () ,len(results) == 0
+        has_fangtianxia = results[0][0]  # 获取 结果 元组
+        # print ("has_fangtianxia == ", has_fangtianxia())
+        db.close()
+        return has_fangtianxia
+    else:
+        db.close()
+        return 0
+
+
+def import2DB(city_name, loupan_name, open_date):
+    print("city_name={0}, loupan_name={1}, open_date={2}".format(city_name, loupan_name, open_date))
+    updateDict = {}
+    tableName = 'hot_loupan_copy_copy'
+    has_fangtianxia = '1'
+    # 获取 total
+    total = getTotal(tableName, loupan_name)
+    if total:
+        print("into if total = ", total)
+        if getLocalFlag(tableName, loupan_name) != 1:
+            updateDict["total"] = str(total + 1)
+            updateDict["has_fangtianxia"] = has_fangtianxia
+            updateDB(tableName, updateDict, loupan_name)
+    else:
+        print("into else total = ", total)
+        # 打开数据库连接
+        db = pymysql.connect("localhost", "root", "123456", "test", charset='utf8')
+        # 使用cursor()方法获取操作游标
+        cursor = db.cursor()
+
+        total = 1
+        dbID = getMaxDBID()
+        timestamp = time.time()
+        timeTem = time.localtime(timestamp)
+        stat = time.strftime("%Y-%m-%d", timeTem)
+        insertKeys = "(id,stat_day,city_name,loupan_name,has_fangtianxia,total,open_date)"
+        insertValues = "VALUES(" + str(
+            dbID) + "," + "'" + stat + "'" + "," + "'" + city_name + "'" + "," + "'" + loupan_name + "'" + "," + has_fangtianxia + "," + str(
+            total) + "," + "'" + open_date + "')"
+        sql = "INSERT INTO " + tableName + insertKeys + insertValues
+        print(sql)
+        try:
+            # 执行sql语句
+            cursor.execute(sql)
+            # 提交到数据库执行
+            db.commit()
+        except Exception as e:
+            print(" error in  rollback ========= >>>>>>>>>  ", e)
+            print("into sql ============>>>>>>>>>>", sql)
+            db.rollback()
+
+
+if __name__ == '__main__':
+    for page in range(1, 53):
+        url = 'http://newhouse.cq.fang.com/house/s/b9{}/?ctm=1.cq.xf_search.page.11'.format(page)
+        req = requests.get(url).content.decode('gbk')
+        xph = etree.HTML(req)
+        open_xph = xph.xpath('//*[@class="nlcd_name"]/a/text()')
+        for lie in open_xph:
+            loupan_name = lie.replace('\n', '').replace('\t', '')
+            print(loupan_name)
+            # time.sleep(1)
+            city_name = '重庆'
+            open_date = '########'
+            import2DB(city_name, loupan_name, open_date)
